@@ -2,56 +2,58 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ExternalProviderDisplayItem } from '@/components/common/ImportExternalProvidersModal/types';
 import ImportFromAllApiHubModalBase from '@/features/coding/shared/allApiHub/ImportFromAllApiHubModal';
-import {
-  listOpenCodeAllApiHubProviders,
-  resolveOpenCodeAllApiHubProviders,
-  type OpenCodeAllApiHubProvider,
-} from '@/services/opencodeApi';
-import type { OpenCodeProvider } from '@/types/opencode';
 import type { AllApiHubProviderModelsState } from '@/features/coding/shared/allApiHubModelsCache';
+import {
+  listClaudeAllApiHubProviders,
+  resolveClaudeAllApiHubProviders,
+} from '@/services/claudeCodeApi';
+import type { OpenCodeAllApiHubProvider } from '@/services/opencodeApi';
+import type { OpenCodeProvider } from '@/types/opencode';
 
 interface Props {
   open: boolean;
   existingProviderIds: string[];
-  onClose: () => void;
+  onCancel: () => void;
   onImport: (providers: OpenCodeAllApiHubProvider[]) => void;
 }
+
+const SUPPORTED_PROVIDER_TYPES: string[] = [];
 
 const ImportFromAllApiHubModal: React.FC<Props> = ({
   open,
   existingProviderIds,
-  onClose,
+  onCancel,
   onImport,
 }) => {
   const { t } = useTranslation();
 
   const texts = React.useMemo(
     () => ({
-      title: t('opencode.provider.importAllApiHubModalTitle'),
-      noProvidersText: t('opencode.provider.noAllApiHubProviders'),
+      title: t('common.allApiHub.importFromAllApiHub'),
+      noProvidersText: t('common.allApiHub.noAllApiHubProviders'),
       cancelText: t('common.cancel'),
-      importButtonText: t('opencode.provider.importSelected'),
-      selectAllText: t('opencode.provider.selectAllProviders'),
-      deselectAllText: t('opencode.provider.deselectAllProviders'),
-      existingTagText: t('opencode.provider.providerExists'),
-      noApiKeyTagText: t('opencode.provider.apiKeyMissing'),
-      disabledTagText: t('opencode.provider.disabled'),
-      balanceLabelText: t('opencode.provider.balance'),
-      modelsLabelText: t('opencode.provider.models'),
-      loadingModelsText: t('opencode.provider.loadingModels'),
-      emptyModelsText: t('opencode.provider.emptyModels'),
-      modelsErrorText: t('opencode.provider.modelsLoadFailed'),
-      unsupportedModelsText: t('opencode.provider.unsupportedModels'),
-      expandModelsText: t('opencode.provider.expandModels'),
-      collapseModelsText: t('opencode.provider.collapseModels'),
-      profileLabel: t('opencode.provider.sourceProfile'),
-      siteTypeLabel: t('opencode.provider.siteType'),
-      loadingTokenText: t('opencode.provider.loadingApiKey'),
-      tokenResolvedText: t('opencode.provider.apiKeyReady'),
-      retryResolveText: t('opencode.provider.retryResolve'),
-      searchPlaceholder: t('opencode.provider.searchPlaceholder'),
-      confirmTitle: t('opencode.provider.importAllApiHubOpenAiCompatTitle'),
-      confirmOkText: t('opencode.provider.importAllApiHubReviewConfirm'),
+      importButtonText: t('common.allApiHub.importSelected'),
+      selectAllText: t('common.allApiHub.selectAll'),
+      deselectAllText: t('common.allApiHub.deselectAll'),
+      existingTagText: t('common.allApiHub.alreadyExists'),
+      noApiKeyTagText: t('common.allApiHub.apiKeyMissing'),
+      disabledTagText: t('common.allApiHub.disabled'),
+      balanceLabelText: t('common.allApiHub.balance'),
+      modelsLabelText: t('common.allApiHub.models'),
+      loadingModelsText: t('common.allApiHub.loadingModels'),
+      emptyModelsText: t('common.allApiHub.emptyModels'),
+      modelsErrorText: t('common.allApiHub.modelsLoadFailed'),
+      unsupportedModelsText: t('common.allApiHub.unsupportedModels'),
+      expandModelsText: t('common.allApiHub.expandModels'),
+      collapseModelsText: t('common.allApiHub.collapseModels'),
+      profileLabel: t('common.allApiHub.sourceProfile'),
+      siteTypeLabel: t('common.allApiHub.siteType'),
+      loadingTokenText: t('common.allApiHub.loadingApiKey'),
+      tokenResolvedText: t('common.allApiHub.apiKeyReady'),
+      retryResolveText: t('common.allApiHub.retryResolve'),
+      searchPlaceholder: t('common.allApiHub.searchPlaceholder'),
+      confirmTitle: t('common.allApiHub.importAllApiHubProtocolTitle'),
+      confirmOkText: t('common.allApiHub.importAllApiHubReviewConfirm'),
     }),
     [t]
   );
@@ -89,7 +91,7 @@ const ImportFromAllApiHubModal: React.FC<Props> = ({
       [
         providers.filter((provider) => provider.npm === '@ai-sdk/openai-compatible').length > 0
           ? {
-              description: t('opencode.provider.importAllApiHubOpenAiCompatDesc'),
+              description: t('common.allApiHub.importAllApiHubProtocolDesc'),
               providerNames: providers
                 .filter((provider) => provider.npm === '@ai-sdk/openai-compatible')
                 .map((provider) => provider.name),
@@ -97,7 +99,7 @@ const ImportFromAllApiHubModal: React.FC<Props> = ({
           : null,
         providers.filter((provider) => !provider.hasApiKey).length > 0
           ? {
-              description: t('opencode.provider.importAllApiHubMissingApiKeyDesc'),
+              description: t('common.allApiHub.importAllApiHubMissingApiKeyDesc'),
               providerNames: providers
                 .filter((provider) => !provider.hasApiKey)
                 .map((provider) => provider.name),
@@ -110,11 +112,11 @@ const ImportFromAllApiHubModal: React.FC<Props> = ({
   return (
     <ImportFromAllApiHubModalBase
       open={open}
-      providerTypes={[]}
+      providerTypes={SUPPORTED_PROVIDER_TYPES}
       existingProviderIds={existingProviderIds}
-      listProviders={listOpenCodeAllApiHubProviders}
-      resolveProviders={resolveOpenCodeAllApiHubProviders}
-      onCancel={onClose}
+      listProviders={listClaudeAllApiHubProviders}
+      resolveProviders={resolveClaudeAllApiHubProviders}
+      onCancel={onCancel}
       onImport={onImport}
       texts={texts}
       getProviderId={(provider) => provider.providerId}
