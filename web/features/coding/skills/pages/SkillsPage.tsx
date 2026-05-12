@@ -9,6 +9,7 @@ import {
   ExternalLink,
   GripVertical,
   Import,
+  FileJson,
   LayoutGrid,
   ListTree,
   MinusCircle,
@@ -43,6 +44,9 @@ import { SkillsSettingsModal } from '../components/modals/SkillsSettingsModal';
 import { DeleteConfirmModal } from '../components/modals/DeleteConfirmModal';
 import { NewToolsModal } from '../components/modals/NewToolsModal';
 import { SkillMetadataModal } from '../components/modals/SkillMetadataModal';
+import { SkillGroupsModal } from '../components/modals/SkillGroupsModal';
+import { SkillInventoryModal } from '../components/modals/SkillInventoryModal';
+import * as api from '../services/skillsApi';
 import {
   buildSkillGroups,
   filterSkillsBySearch,
@@ -55,7 +59,8 @@ import {
   normalizeSkillMetadataText,
   type SkillGroupingMode,
 } from '../utils/skillGrouping';
-import type { ManagedSkill, SkillGroup } from '../types';
+import { GROUP_TOOL_BATCH_OPTIONS } from '../utils/batchToolOptions';
+import type { ManagedSkill, SkillEnabledFilter, SkillGroup } from '../types';
 import styles from './SkillsPage.module.less';
 
 const AUTO_EXPAND_SKILL_THRESHOLD = 20;
@@ -70,6 +75,7 @@ const SkillsPage: React.FC = () => {
     isSettingsModalOpen,
     setSettingsModalOpen,
     isNewToolsModalOpen,
+    groups,
     loading,
   } = useSkillsStore();
 
@@ -91,6 +97,9 @@ const SkillsPage: React.FC = () => {
   const [metadataSkill, setMetadataSkill] = React.useState<ManagedSkill | null>(null);
   const [batchGroupModalOpen, setBatchGroupModalOpen] = React.useState(false);
   const [batchGroupValue, setBatchGroupValue] = React.useState('');
+  const [groupsModalOpen, setGroupsModalOpen] = React.useState(false);
+  const [inventoryModalOpen, setInventoryModalOpen] = React.useState(false);
+  const [enabledFilter, setEnabledFilter] = React.useState<SkillEnabledFilter>('all');
   const [groupToolMode, setGroupToolMode] = React.useState(false);
   const [gridColumnSetting, setGridColumnSetting] = React.useState<ManagementGridColumnSetting>('auto');
   const deferredSearchText = React.useDeferredValue(searchText);
@@ -123,17 +132,23 @@ const SkillsPage: React.FC = () => {
     handleBatchAddTool,
     handleBatchRemoveTool,
     handleBatchSetGroup,
+    handleSetManagementEnabled,
   } = useSkillActions({ allTools });
 
   // Filter skills by search text
   const filteredSkills = React.useMemo(() => {
-    return filterSkillsBySearch(skills, deferredSearchText);
-  }, [skills, deferredSearchText]);
+    const byStatus = skills.filter((skill) => {
+      if (enabledFilter === 'enabled') return skill.management_enabled;
+      if (enabledFilter === 'disabled') return !skill.management_enabled;
+      return true;
+    });
+    return filterSkillsBySearch(byStatus, deferredSearchText);
+  }, [skills, deferredSearchText, enabledFilter]);
 
   const isSearchActive = !!searchText.trim();
   const isFlatReorderEnabled = viewMode === 'flat' && reorderMode && !isSearchActive;
   const canUseGroupToolMode = viewMode === 'grouped' && groupMode === 'custom' && !isSearchActive;
-  const groupOptions = React.useMemo(() => getSkillGroupOptions(skills), [skills]);
+  const groupOptions = React.useMemo(() => getSkillGroupOptions(groups), [groups]);
 
   React.useEffect(() => {
     if (viewMode !== 'flat' || isSearchActive) {
@@ -208,9 +223,14 @@ const SkillsPage: React.FC = () => {
   );
 
   const handleConfirmBatchGroup = React.useCallback(async () => {
+    const normalizedGroupName = normalizeSkillMetadataText(batchGroupValue);
+    const groupId = normalizedGroupName
+      ? groupOptions.find((group) => group.name === normalizedGroupName)?.id
+        ?? await api.saveSkillGroup(normalizedGroupName, null, groupOptions.length)
+      : null;
     const saved = await handleBatchSetGroup(
       selectedArray,
-      normalizeSkillMetadataText(batchGroupValue),
+      groupId,
     );
     if (!saved) {
       return;
@@ -218,7 +238,31 @@ const SkillsPage: React.FC = () => {
     setBatchGroupModalOpen(false);
     setBatchGroupValue('');
     setSelectedIds(new Set());
-  }, [batchGroupValue, handleBatchSetGroup, selectedArray]);
+  }, [batchGroupValue, groupOptions, handleBatchSetGroup, selectedArray]);
+
+  const handleSetSkillEnabled = React.useCallback((skill: ManagedSkill, enabled: boolean) => {
+    if (!enabled) {
+      Modal.confirm({
+        title: t('skills.disableConfirmTitle'),
+        content: t('skills.disableConfirmContent', { name: skill.name, count: skill.enabled_tools.length }),
+        okText: t('skills.disableSkill'),
+        cancelText: t('common.cancel'),
+        onOk: () => handleSetManagementEnabled(skill, false),
+      });
+      return;
+    }
+
+    const restoreTools = skill.disabled_previous_tools.filter((toolId) => allTools.some((tool) => tool.id === toolId));
+    Modal.confirm({
+      title: t('skills.enableConfirmTitle'),
+      content: restoreTools.length > 0
+        ? t('skills.enableConfirmContent', { count: restoreTools.length })
+        : t('skills.enableConfirmEmpty'),
+      okText: t('skills.enableSkill'),
+      cancelText: t('common.cancel'),
+      onOk: () => handleSetManagementEnabled(skill, true, restoreTools),
+    });
+  }, [allTools, handleSetManagementEnabled, t]);
 
   const groupedSkills = React.useMemo<SkillGroup[]>(() => {
     if (viewMode !== 'grouped') return [];
@@ -232,8 +276,9 @@ const SkillsPage: React.FC = () => {
         groupUngrouped: t('skills.groupUngrouped'),
       },
       getGithubInfo,
+      groups,
     );
-  }, [filteredSkills, viewMode, groupMode, getGithubInfo, t]);
+  }, [filteredSkills, viewMode, groupMode, getGithubInfo, groups, t]);
 
   const groupToolTargetGroups = React.useMemo(
     () => groupedSkills.filter((group) => !isSkillUngroupedCustomGroup(group)),
@@ -254,7 +299,11 @@ const SkillsPage: React.FC = () => {
           continue;
         }
 
-        const saved = await handleBatchAddTool(missingSkillIds, toolId, { quiet: true });
+        const saved = await handleBatchAddTool(
+          missingSkillIds,
+          toolId,
+          GROUP_TOOL_BATCH_OPTIONS,
+        );
         if (!saved) {
           return false;
         }
@@ -308,7 +357,7 @@ const SkillsPage: React.FC = () => {
     if (missingSkillIds.length === 0) {
       return;
     }
-    await handleBatchAddTool(missingSkillIds, toolId);
+    await handleBatchAddTool(missingSkillIds, toolId, GROUP_TOOL_BATCH_OPTIONS);
   }, [handleBatchAddTool]);
 
   const handleRemoveGroupTool = React.useCallback(async (group: SkillGroup, toolId: string) => {
@@ -401,6 +450,30 @@ const SkillsPage: React.FC = () => {
           <span className={styles.resultCount}>
             {filteredSkills.length}/{skills.length}
           </span>
+          <ManagementSegmented<SkillEnabledFilter>
+            value={enabledFilter}
+            ariaLabel={t('skills.enabledFilter.label')}
+            onChange={setEnabledFilter}
+            options={[
+              { value: 'all', label: t('skills.enabledFilter.all') },
+              { value: 'enabled', label: t('skills.enabledFilter.enabled') },
+              { value: 'disabled', label: t('skills.enabledFilter.disabled') },
+            ]}
+          />
+          <ManagementButton
+            variant="subtle"
+            icon={<Tags size={15} aria-hidden="true" />}
+            onClick={() => setGroupsModalOpen(true)}
+          >
+            {t('skills.groups.manage')}
+          </ManagementButton>
+          <ManagementButton
+            variant="subtle"
+            icon={<FileJson size={15} aria-hidden="true" />}
+            onClick={() => setInventoryModalOpen(true)}
+          >
+            {t('skills.inventory.button')}
+          </ManagementButton>
           <ManagementButton
             variant="subtle"
             icon={<Import size={15} aria-hidden="true" />}
@@ -551,6 +624,7 @@ const SkillsPage: React.FC = () => {
             onDelete={handleDelete}
             onToggleTool={handleToggleTool}
             onEditMetadata={setMetadataSkill}
+            onSetManagementEnabled={handleSetSkillEnabled}
             onDragEnd={handleDragEnd}
           />
         ) : (
@@ -572,6 +646,7 @@ const SkillsPage: React.FC = () => {
             onDelete={handleDelete}
             onToggleTool={handleToggleTool}
             onEditMetadata={setMetadataSkill}
+            onSetManagementEnabled={handleSetSkillEnabled}
             groupToolMode={groupToolMode}
             onAddGroupTool={handleAddGroupTool}
             onRemoveGroupTool={handleRemoveGroupTool}
@@ -650,7 +725,7 @@ const SkillsPage: React.FC = () => {
           />
           <datalist id="skills-batch-group-options">
             {groupOptions.map((group) => (
-              <option key={group} value={group} />
+              <option key={group.id} value={group.name} />
             ))}
           </datalist>
           <p className={styles.batchGroupHint}>
@@ -668,6 +743,19 @@ const SkillsPage: React.FC = () => {
           setMetadataSkill(null);
           refresh();
         }}
+      />
+
+      <SkillGroupsModal
+        open={groupsModalOpen}
+        groups={groups}
+        onClose={() => setGroupsModalOpen(false)}
+        onSuccess={refresh}
+      />
+
+      <SkillInventoryModal
+        open={inventoryModalOpen}
+        onClose={() => setInventoryModalOpen(false)}
+        onSuccess={refresh}
       />
 
       <NewToolsModal
